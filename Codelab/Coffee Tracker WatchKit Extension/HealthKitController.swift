@@ -167,12 +167,14 @@ class HealthKitController {
             // Update the data on the main queue.
             // DispatchQueue.main.async { we will use an actor
             // might suspend for the main thread to run it
-            await MainActor.run { // [newDrinks] in // makes a new immutable copy of drinks
-                // Update the model.
-                self.updateModel(newDrinks: newDrinks, deletedDrinks: deletedDrinks)
-            }
-            //Expression is 'async' but is not marked with 'await'
-            // self.updateModel(newDrinks: newDrinks, deletedDrinks: deletedDrinks) // will get error
+            /*await MainActor.run {
+                Doing UI work on the main thread is important to keep things in sync!
+                Use MainActor.run for this.
+            }*/
+            // we must mark this with await even though it is a sync function becuse we might have
+            // to wait for the main thread.
+            await self.updateModel(newDrinks: newDrinks, deletedDrinks: deletedDrinks)
+            // think of this as a DispatchQueue sync call but this will not block.
 
             return true
         } catch {
@@ -256,8 +258,7 @@ class HealthKitController {
     // Update the model.
     @MainActor // switch to main thread when called.
     private func updateModel(newDrinks: [Drink], deletedDrinks: Set<UUID>) {
-        // this is a great idea to make sure we are running on the Main Thread.
-        assert(Thread.main == Thread.current, "Must be run on the main queue because it accesses currentDrinks.")
+        // remove assert because compiler will make sure of this
         
         guard !newDrinks.isEmpty && !deletedDrinks.isEmpty else {
             logger.debug("No drinks to add or delete from HealthKit.")
