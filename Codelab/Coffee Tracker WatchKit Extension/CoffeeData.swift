@@ -136,6 +136,27 @@ class CoffeeData: ObservableObject {
         async { await healthKitController.save(drink: drink) } 
     }
     
+    // Update the model.
+    @MainActor // switch to main thread when called.
+    public func updateModel(newDrinks: [Drink], deletedDrinks: Set<UUID>) {
+        
+        guard !newDrinks.isEmpty && !deletedDrinks.isEmpty else {
+            logger.debug("No drinks to add or delete from HealthKit.")
+            return
+        }
+        
+        // Remove the deleted drinks.
+        var drinks = currentDrinks.filter { deletedDrinks.contains($0.uuid) }
+        
+        // Add the new drinks.
+        drinks += newDrinks
+        
+        // Sort the array by date.
+        drinks.sort { $0.date < $1.date }
+        
+        currentDrinks = drinks
+    }
+    
     // MARK: - Private Methods
     
     // The model's initializer. Do not call this method.
@@ -233,6 +254,7 @@ class CoffeeData: ObservableObject {
                 currentDrinks = drinks
                 
                 // Load new data from HealthKit.
+                // these functions do not need isolation in the actor, just create task and does not change state
                 self.healthKitController.requestAuthorization { (success) in
                     guard success else {
                         logger.debug("Unable to authorize HealthKit.")

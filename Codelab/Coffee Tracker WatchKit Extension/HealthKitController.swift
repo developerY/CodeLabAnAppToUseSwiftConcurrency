@@ -23,7 +23,10 @@ private let types: Set<HKSampleType> = [caffeineType]
 // Milligram units.
 private let miligrams = HKUnit.gramUnit(with: .milli)
 
-class HealthKitController {
+
+// @MainActor // will make verything in HealthKitController run on the main thread but overkill
+// this actor can be called multiple times.  Actor is simular to a Class
+actor HealthKitController {
     
     let logger = Logger(subsystem: "com.example.apple-samplecode.Coffee-Tracker.watchkitapp.watchkitextension.HealthKitController",
                         category: "HealthKit")
@@ -83,7 +86,8 @@ class HealthKitController {
     
     // Request authorization to read and save the required data types.
     @available(*, deprecated, message: "Prefer async alternative instead")
-    public func requestAuthorization(completionHandler: @escaping (Bool) -> Void ) {
+    // not part of the Actor protected state and can be called from other part of the program
+    nonisolated public func requestAuthorization(completionHandler: @escaping (Bool) -> Void ) {
         async {
             let result = await requestAuthorization()
             completionHandler(result)
@@ -106,7 +110,10 @@ class HealthKitController {
     
     
     @available(*, deprecated, message: "Prefer async alternative instead")
-    public func loadNewDataFromHealthKit( completionHandler: @escaping (Bool) -> Void = { _ in }) {
+    // the compiler will check that this is true
+    nonisolated public func loadNewDataFromHealthKit( completionHandler: @escaping (Bool) -> Void = { _ in }) {
+        // Actor-isolated property 'isAuthorized' can not be referenced from a non-isolated context
+        // print(isAuthorized) // 
         async { completionHandler(await self.loadNewDataFromHealthKit())}
     }
     
@@ -173,7 +180,7 @@ class HealthKitController {
             }*/
             // we must mark this with await even though it is a sync function becuse we might have
             // to wait for the main thread.
-            await self.updateModel(newDrinks: newDrinks, deletedDrinks: deletedDrinks)
+            await model?.updateModel(newDrinks: newDrinks, deletedDrinks: deletedDrinks)
             // think of this as a DispatchQueue sync call but this will not block.
 
             return true
@@ -254,29 +261,7 @@ class HealthKitController {
 
         return Set(uuidsToDelete)
     }
+    // move to CoffeeData
     
-    // Update the model.
-    @MainActor // switch to main thread when called.
-    private func updateModel(newDrinks: [Drink], deletedDrinks: Set<UUID>) {
-        // remove assert because compiler will make sure of this
-        
-        guard !newDrinks.isEmpty && !deletedDrinks.isEmpty else {
-            logger.debug("No drinks to add or delete from HealthKit.")
-            return
-        }
-        
-        // Get a copy of the current drink data.
-        guard let oldDrinks = model?.currentDrinks else { return }
-        
-        // Remove the deleted drinks.
-        var drinks = oldDrinks.filter { deletedDrinks.contains($0.uuid) }
-        
-        // Add the new drinks.
-        drinks += newDrinks
-        
-        // Sort the array by date.
-        drinks.sort { $0.date < $1.date }
-        
-        model?.currentDrinks = drinks
-    }
+    
 }
