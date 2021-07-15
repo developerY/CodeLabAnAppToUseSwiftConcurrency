@@ -153,7 +153,7 @@ class HealthKitController {
     }
     
     // Save a drink to HealthKit as a caffeine sample.
-    public func save(drink: Drink) {
+    public func save(drink: Drink) async {
         
         // Make sure HealthKit is available and authorized.
         guard isAvailable else { return }
@@ -176,15 +176,15 @@ class HealthKitController {
                                               metadata: metadata)
         
         // Save the sample to the HealthKit store.
-        store.save(caffeineSample) { success, error in
-            guard success else {
-                self.logger.error("Unable to save \(caffeineSample) to the HealthKit store: \(error!.localizedDescription)")
-                return
-            }
-            
+        do {
+            try await store.save(caffeineSample)
             self.logger.debug("\(mgCaffeine) mg Drink saved to HealthKit")
+        } catch {
+                self.logger.error("Unable to save \(caffeineSample) to the HealthKit store: \(error.localizedDescription)")
         }
+            
     }
+
     
     // MARK: - Private Methods
     // Take an array of caffeine samples and returns an array of drinks.
