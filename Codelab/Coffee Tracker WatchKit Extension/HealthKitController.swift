@@ -171,6 +171,9 @@ class HealthKitController {
                 // Update the model.
                 self.updateModel(newDrinks: newDrinks, deletedDrinks: deletedDrinks)
             }
+            //Expression is 'async' but is not marked with 'await'
+            // self.updateModel(newDrinks: newDrinks, deletedDrinks: deletedDrinks) // will get error
+
             return true
         } catch {
             self.logger.error("An error occurred while querying for samples: \(error.localizedDescription)")
@@ -251,7 +254,9 @@ class HealthKitController {
     }
     
     // Update the model.
+    @MainActor // switch to main thread when called.
     private func updateModel(newDrinks: [Drink], deletedDrinks: Set<UUID>) {
+        // this is a great idea to make sure we are running on the Main Thread.
         assert(Thread.main == Thread.current, "Must be run on the main queue because it accesses currentDrinks.")
         
         guard !newDrinks.isEmpty && !deletedDrinks.isEmpty else {
