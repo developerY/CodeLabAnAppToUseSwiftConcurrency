@@ -154,9 +154,11 @@ class HealthKitController {
             self.anchor = newAnchor
             
             // Convert new caffeine samples into Drink instances.
-            var newDrinks: [Drink] = []
+            let newDrinks: [Drink]
             if let samples = samples {
                 newDrinks = self.drinksToAdd(from: samples)
+            } else {
+                newDrinks = []
             }
             
             // Create a set of UUIDs for any samples deleted from HealthKit.
@@ -165,7 +167,7 @@ class HealthKitController {
             // Update the data on the main queue.
             // DispatchQueue.main.async { we will use an actor
             // might suspend for the main thread to run it
-            await MainActor.run { [newDrinks] in // makes a new immutable copy of drinks
+            await MainActor.run { // [newDrinks] in // makes a new immutable copy of drinks
                 // Update the model.
                 self.updateModel(newDrinks: newDrinks, deletedDrinks: deletedDrinks)
             }
