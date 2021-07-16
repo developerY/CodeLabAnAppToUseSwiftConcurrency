@@ -10,14 +10,14 @@ import ClockKit
 import os
 
 private let floatFormatter = FloatingPointFormatStyle().precision(.significantDigits(1...3))
-private var savedValue: [Drink] = []
 
 private actor CoffeeDataStore {
     let logger = Logger(subsystem: "com.example.apple-samplecode.Coffee-Tracker.watchkitapp.watchkitextension.CoffeeDataStore", category: "Model")
     
     // Use this value to determine whether you have changes that can be saved to disk.
     // used both by save and load so protection from Actor is good.
-    // private var savedValue: [Drink] = []
+    private var savedValue: [Drink] = []
+
     
     // Begin saving the drink data to disk.
     // actors use values to communcate
@@ -52,13 +52,40 @@ private actor CoffeeDataStore {
 
             // Update the saved value.
             // self.savedValue = currentDrinks
-            savedValue = currentDrinks
+            self.savedValue = currentDrinks
             
             self.logger.debug("Saved!")
         } catch {
             self.logger.error("An error occurred while saving the data: \(error.localizedDescription)")
         }
         
+    }
+    
+    // Begin loading the data from disk.
+    // the load is split - top half runs in the actor -- DispatchQueue.main.async
+    func load() -> [Drink]{
+        let drinks: [Drink]
+        
+        do {
+            // Load the drink data from a binary plist file.
+            let data = try Data(contentsOf: self.dataURL)
+            
+            // Decode the data.
+            let decoder = PropertyListDecoder()
+            drinks = try decoder.decode([Drink].self, from: data)
+            logger.debug("Data loaded from disk")
+        } catch CocoaError.fileReadNoSuchFile {
+            logger.debug("No file found--creating an empty drink list.")
+            drinks = []
+        } catch {
+            fatalError("*** An unexpected error occurred while loading the drink list: \(error.localizedDescription) ***")
+        }
+        
+        // Update the saved value.
+        // Was ossilbe race condition -- but with Actor that is not a problem.
+        savedValue = drinks
+        
+        return drinks
     }
     
     // Returns the URL for the plist file that stores the drink data.
@@ -78,6 +105,7 @@ private actor CoffeeDataStore {
 
 // The data model for the Coffee Tracker app.
 // @Published to UI must be done on Main Thread.
+@MainActor
 class CoffeeData: ObservableObject {
     
     let logger = Logger(subsystem: "com.example.apple-samplecode.Coffee-Tracker.watchkitapp.watchkitextension.CoffeeData", category: "Model")
@@ -92,7 +120,7 @@ class CoffeeData: ObservableObject {
     private let store  = CoffeeDataStore()
     
     // A background queue used to save and load the model data.
-    private var background = DispatchQueue(label: "Background Queue", qos: .userInitiated)
+    // private var background = DispatchQueue(label: "Background Queue", qos: .userInitiated)
     
     // The list of drinks consumed.
     // Because this is @Published property,
@@ -225,7 +253,6 @@ class CoffeeData: ObservableObject {
         drinks.sort { $0.date < $1.date }
         
         currentDrinks = drinks
-        
         // this could suspend so it is important that it happens in one atomic operation.
         await drinksUpdated()
     }
@@ -237,72 +264,28 @@ class CoffeeData: ObservableObject {
     private init() {
         
         // Begin loading the data from disk.
-        load()
+        async { await load() }
     }
     
-    
-    
-    // Begin loading the data from disk.
-    func load() {
-        // Read the data from a background queue.
-        background.async { [self] in
-            logger.debug("Loading the model.")
+    // @MainActor -- better to put it on the entire model
+    func load() async {
+        var drinks = await store.load()
+        // Drop old drinks
+        drinks.removeOutdatedDrinks()
         
-            var drinks: [Drink]
-            
-            do {
-                // Load the drink data from a binary plist file.
-                let data = try Data(contentsOf: self.dataURL)
-                
-                // Decode the data.
-                let decoder = PropertyListDecoder()
-                drinks = try decoder.decode([Drink].self, from: data)
-                logger.debug("Data loaded from disk")
-            } catch CocoaError.fileReadNoSuchFile {
-                logger.debug("No file found--creating an empty drink list.")
-                drinks = []
-            } catch {
-                fatalError("*** An unexpected error occurred while loading the drink list: \(error.localizedDescription) ***")
-            }
-            
-            // Update the entires on the main queue.
-            DispatchQueue.main.async {
-                
-                // Update the saved value.
-                savedValue = drinks
-                
-                // Drop old drinks
-                drinks.removeOutdatedDrinks()
-                
-                // Assign loaded drinks to model
-                currentDrinks = drinks
-                
-                // Load new data from HealthKit.
-                // these functions do not need isolation in the actor, just create task and does not change state
-                self.healthKitController.requestAuthorization { (success) in
-                    guard success else {
-                        logger.debug("Unable to authorize HealthKit.")
-                        return
-                    }
-                    
-                    self.healthKitController.loadNewDataFromHealthKit()
-                }
-            }
+        // Assign loaded drinks to model
+        currentDrinks = drinks
+        await drinksUpdated()
+        
+        // Load new data from HealthKit.
+        // these functions do not need isolation in the actor, just create task and does not change state
+        let success = await self.healthKitController.requestAuthorization()
+        guard success else {
+            logger.debug("Unable to authorize HealthKit.")
+            return
         }
-    }
-    
-    // Returns the URL for the plist file that stores the drink data.
-    private var dataURL: URL {
-        get throws {
-            try FileManager
-                   .default
-                   .url(for: .documentDirectory,
-                        in: .userDomainMask,
-                        appropriateFor: nil,
-                        create: false)
-                   // Append the file name to the directory.
-                   .appendingPathComponent("CoffeeTracker.plist")
-        }
+        // happy path
+        await self.healthKitController.loadNewDataFromHealthKit()
     }
 }
 
