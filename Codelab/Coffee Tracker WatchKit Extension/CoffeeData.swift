@@ -10,8 +10,74 @@ import ClockKit
 import os
 
 private let floatFormatter = FloatingPointFormatStyle().precision(.significantDigits(1...3))
+private var savedValue: [Drink] = []
+
+private actor CoffeeDataStore {
+    let logger = Logger(subsystem: "com.example.apple-samplecode.Coffee-Tracker.watchkitapp.watchkitextension.CoffeeDataStore", category: "Model")
+    
+    // Use this value to determine whether you have changes that can be saved to disk.
+    // used both by save and load so protection from Actor is good.
+    // private var savedValue: [Drink] = []
+    
+    // Begin saving the drink data to disk.
+    // actors use values to communcate
+    func save(_ currentDrinks:[Drink]) {
+        
+        // Don't save the data if there haven't been any changes.
+        if currentDrinks == savedValue {
+            logger.debug("The drink list hasn't changed. No need to save.")
+            return
+        }
+        
+        // Save as a binary plist file.
+        let encoder = PropertyListEncoder()
+        encoder.outputFormat = .binary
+        
+        let data: Data
+        
+        do {
+            // Encode the currentDrinks array.
+            data = try encoder.encode(currentDrinks)
+        } catch {
+            logger.error("An error occurred while encoding the data: \(error.localizedDescription)")
+            return
+        }
+        
+        // Save the data to disk as a binary plist file.
+        // Do all these in the background
+      
+        do {
+            // Write the data to disk
+            try data.write(to: self.dataURL, options: [.atomic])
+
+            // Update the saved value.
+            // self.savedValue = currentDrinks
+            savedValue = currentDrinks
+            
+            self.logger.debug("Saved!")
+        } catch {
+            self.logger.error("An error occurred while saving the data: \(error.localizedDescription)")
+        }
+        
+    }
+    
+    // Returns the URL for the plist file that stores the drink data.
+    private var dataURL: URL {
+        get throws {
+            try FileManager
+                   .default
+                   .url(for: .documentDirectory,
+                        in: .userDomainMask,
+                        appropriateFor: nil,
+                        create: false)
+                   // Append the file name to the directory.
+                   .appendingPathComponent("CoffeeTracker.plist")
+        }
+    }
+}
 
 // The data model for the Coffee Tracker app.
+// @Published to UI must be done on Main Thread.
 class CoffeeData: ObservableObject {
     
     let logger = Logger(subsystem: "com.example.apple-samplecode.Coffee-Tracker.watchkitapp.watchkitextension.CoffeeData", category: "Model")
@@ -22,28 +88,29 @@ class CoffeeData: ObservableObject {
     lazy var healthKitController = HealthKitController(withModel: self)
     
     // A background queue used to save and load the model data.
+    // We want the everything but this to run on the Main Thread so lets factor this out.
+    private let store  = CoffeeDataStore()
+    
+    // A background queue used to save and load the model data.
     private var background = DispatchQueue(label: "Background Queue", qos: .userInitiated)
     
     // The list of drinks consumed.
     // Because this is @Published property,
     // Combine notifies any observers when a change occurs.
-    @Published public var currentDrinks: [Drink] = [] {
-        didSet {
-            logger.debug("A value has been assigned to the current drinks property.")
-            
-            // Update any complications on active watch faces.
-            let server = CLKComplicationServer.sharedInstance()
-            for complication in server.activeComplications ?? [] {
-                server.reloadTimeline(for: complication)
-            }
-            
-            // Begin saving the data.
-            self.save()
+    @Published public private(set) var currentDrinks: [Drink] = []
+        
+    private func drinksUpdated() async {
+        logger.debug("A value has been assigned to the current drinks property.")
+        
+        // Update any complications on active watch faces.
+        let server = CLKComplicationServer.sharedInstance()
+        for complication in server.activeComplications ?? [] {
+            server.reloadTimeline(for: complication)
         }
+        
+        // Begin saving the data.
+        await store.save(currentDrinks)
     }
-    
-    // Use this value to determine whether you have changes that can be saved to disk.
-    private var savedValue: [Drink] = []
     
     // The current level of caffeine in milligrams.
     // This property is calculated based on the currentDrinks array.
@@ -133,12 +200,15 @@ class CoffeeData: ObservableObject {
         currentDrinks = drinks
         
         // Save drink information to HealthKit.
-        async { await healthKitController.save(drink: drink) } 
+        async {
+            await self.healthKitController.save(drink: drink)
+            await self.drinksUpdated()
+        }
     }
     
     // Update the model.
     @MainActor // switch to main thread when called.
-    public func updateModel(newDrinks: [Drink], deletedDrinks: Set<UUID>) {
+    public func updateModel(newDrinks: [Drink], deletedDrinks: Set<UUID>) async {
         
         guard !newDrinks.isEmpty && !deletedDrinks.isEmpty else {
             logger.debug("No drinks to add or delete from HealthKit.")
@@ -155,6 +225,9 @@ class CoffeeData: ObservableObject {
         drinks.sort { $0.date < $1.date }
         
         currentDrinks = drinks
+        
+        // this could suspend so it is important that it happens in one atomic operation.
+        await drinksUpdated()
     }
     
     // MARK: - Private Methods
@@ -167,56 +240,7 @@ class CoffeeData: ObservableObject {
         load()
     }
     
-    // Begin saving the drink data to disk.
-    func save() {
-        
-        // Don't save the data if there haven't been any changes.
-        if currentDrinks == savedValue {
-            logger.debug("The drink list hasn't changed. No need to save.")
-            return
-        }
-        
-        // Save as a binary plist file.
-        let encoder = PropertyListEncoder()
-        encoder.outputFormat = .binary
-        
-        let data: Data
-        
-        do {
-            // Encode the currentDrinks array.
-            data = try encoder.encode(currentDrinks)
-        } catch {
-            logger.error("An error occurred while encoding the data: \(error.localizedDescription)")
-            return
-        }
-        
-        // Save the data to disk as a binary plist file.
-        let saveAction = {
-            do {
-                // Write the data to disk
-                try data.write(to: self.dataURL, options: [.atomic])
     
-                // Update the saved value.
-                self.savedValue = self.currentDrinks
-                
-                self.logger.debug("Saved!")
-            } catch {
-                self.logger.error("An error occurred while saving the data: \(error.localizedDescription)")
-            }
-        }
-        
-        // If the app is running in the background, save synchronously.
-        if WKExtension.shared().applicationState == .background {
-            logger.debug("Synchronously saving the model on \(Thread.current).")
-            saveAction()
-        } else {
-            // Otherwise save the data on a background queue.
-            background.async {
-                self.logger.debug("Asynchronously saving the model on a background thread.")
-                saveAction()
-            }
-        }
-    }
     
     // Begin loading the data from disk.
     func load() {
