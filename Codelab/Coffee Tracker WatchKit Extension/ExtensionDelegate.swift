@@ -28,19 +28,20 @@ class ExtensionDelegate: NSObject, WKExtensionDelegate {
             // Handle background refresh tasks.
             case let backgroundTask as WKApplicationRefreshBackgroundTask:
                 
-                // Check for updates from HealthKit.
-                let model = CoffeeData.shared
-                
-                model.healthKitController.loadNewDataFromHealthKit { success in
-                    
-                    if success {
-                        // Schedule the next background update.
-                        scheduleBackgroundRefreshTasks()
-                        self.logger.debug("Background Task Completed Successfully!")
-                    }
-                    
-                    // Mark the task as ended, and request an updated snapshot, if necessary.
-                    backgroundTask.setTaskCompletedWithSnapshot(success)
+                async {
+                        // Check for updates from HealthKit.
+                        let model = CoffeeData.shared
+                        
+                        let success = await model.healthKitController.loadNewDataFromHealthKit()
+                            
+                        if success {
+                            // Schedule the next background update.
+                            scheduleBackgroundRefreshTasks()
+                            self.logger.debug("Background Task Completed Successfully!")
+                        }
+                        
+                        // Mark the task as ended, and request an updated snapshot, if necessary.
+                        backgroundTask.setTaskCompletedWithSnapshot(success)
                 }
                 
             case let snapshotTask as WKSnapshotRefreshBackgroundTask:

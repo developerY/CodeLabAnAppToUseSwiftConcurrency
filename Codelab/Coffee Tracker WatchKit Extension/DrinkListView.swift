@@ -11,6 +11,7 @@ import SwiftUI
 // Users can select drinks from the list.
 struct DrinkListView: View {
     
+    // any access to shared state will always be on the main thread.
     @EnvironmentObject var coffeeData: CoffeeData
     @Environment(\.presentationMode) var presentationMode
     
@@ -27,6 +28,8 @@ struct DrinkListView: View {
     }
     
     // Update the model when the user taps a drink.
+    // because this is done on the main thread we can call it from the MainActor.
+    // no awaited needed
     func addDrink(type: DrinkType) {
         // Add a drink to the model.
         coffeeData.addDrink(mgCaffeine: type.mgCaffeinePerServing,

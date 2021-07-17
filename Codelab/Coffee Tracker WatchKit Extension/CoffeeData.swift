@@ -235,7 +235,7 @@ class CoffeeData: ObservableObject {
     }
     
     // Update the model.
-    @MainActor // switch to main thread when called.
+    // @MainActor // switch to main thread when called.
     public func updateModel(newDrinks: [Drink], deletedDrinks: Set<UUID>) async {
         
         guard !newDrinks.isEmpty && !deletedDrinks.isEmpty else {
